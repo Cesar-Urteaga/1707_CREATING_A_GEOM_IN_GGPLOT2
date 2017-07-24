@@ -16,7 +16,7 @@ The project has the following structure:
 
 As stated above, the two images created by the geom are the following:
 
-### Whole path of the Hurricane Ike at 18:00 UTC during each day.
+### Whole path of the Hurricane Ike at 18:00 UTC during each observed day.
 
 ![Path of the Hurrican Ike](./_GRAPHS/Ike_path.png?raw=true)
 
