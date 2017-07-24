@@ -1,0 +1,242 @@
+# Extending ggplot2
+
+This is a personal summary of how to create a geom in `ggplot2` based on the vignette *Extending ggplot2* by Hadley Wickham and *Master Software Development in R* by Roger D. Peng, Seon Kross, and Brooke Anderson.
+
+## Motivation
+
+You may want to create your own geoms for two reasons:
+
+* **Implement a new feature**: Maybe there is a feature that is not yet implemented.
+* **Simplify a complex workflow**: With certain parts of analysis you may find yourself doing the same kind of plot repeatedly.
+
+## Creating a new stat
+
+To create a new geom or stat, you will need to follow the next steps:
+
+  1.- Create a new ggproto that inherits from `Stat`/`Geom` and override the methods described below.
+
+  2.- Write a layer function beginning with `stat_`/`geom_` with the following structure: default arguments, a `layer()` function, and `...` that will be used by the `params` argument.  The parameters given in `...` will either be arguments for the geom (if it is stat wrapper), arguments for the stat (if it is a geom wrapper), or asthetics to be set.
+
+Here is a little example:
+
+```{r}
+library(ggplot2)
+#------------------------------------------------------- 1. CREATE A NEW GGPROTO
+StatChull <- ggproto(`_class`   = "StatChull",
+                     #  Remember that we have have to inherit from Stat/Geom.
+                     `_inherit` = Stat,
+                     #  Does the computation
+                     compute_group = function(data, scales) {
+                     #  chull returns the elements that lie on the convex hull.
+                     data[chull(data$x, data$y), , drop = FALSE]
+                       },
+                     #  Establishes the asthetics that must be present so as to
+                     #  work.
+                     required_aes = c("x", "y")
+                     )
+#----------------------------------------------------- 2. WRITE A LAYER FUNCTION
+stat_chull <- function(mapping = NULL, data = NULL, geom = "polygon",
+                       position = "identity", na.rm = FALSE, show.legend = NA,
+                       inherit.aes = TRUE, ...) {
+  # Assures that the given parameters are stored correctly.
+  layer(
+    stat = StatChull, data = data, mapping = mapping, geom = geom,
+    position = position, show.legend = show.legend, inherit.aes = inherit.aes,
+    params = list(na.rm = na.rm, ...)
+  )
+}
+# We can change the color of the convex hull for each group.
+ggplot(mpg, aes(displ, hwy, colour = drv)) +
+  geom_point() +
+  stat_chull(fill = NA)
+# Overrides the default geom.
+ggplot(mpg, aes(displ, hwy)) +
+  stat_chull(geom = "point", size = 4, colour = "red") +
+  geom_point()
+```
+
+**N.B.**:  In case you are creating a package, you will either need to call `ggplot2::layer()` explicitly, or import the `layer()` function into your package namespace.
+
+The subsequent example illustrates a stat that makes some tallies.
+
+```{r}
+#------------------------------------------------------- 1. CREATE A NEW GGPROTO
+# This stat creates two points by which a regression line is defined.
+StatLm <- ggproto("StatLm", Stat,
+  required_aes = c("x", "y"),
+  compute_group = function(data, scales) {
+    rng <- range(data$x, na.rm = TRUE)
+    grid <- data.frame(x = rng)
+    mod <- lm(y ~ x, data = data)
+    grid$y <- predict(mod, newdata = grid)
+    grid
+  }
+)
+#----------------------------------------------------- 2. WRITE A LAYER FUNCTION
+stat_lm <- function(mapping = NULL, data = NULL, geom = "line",
+                    position = "identity", na.rm = FALSE, show.legend = NA,
+                    inherit.aes = TRUE, ...) {
+  layer(
+    stat = StatLm, data = data, mapping = mapping, geom = geom,
+    position = position, show.legend = show.legend, inherit.aes = inherit.aes,
+    params = list(na.rm = na.rm, ...)
+  )
+}
+ggplot(mpg, aes(displ, hwy)) +
+  geom_point() +
+  stat_lm()
+```
+
+In the coming example we have included parameters to the created stat.
+
+```{r}
+#------------------------------------------------------- 1. CREATE A NEW GGPROTO
+StatLm <- ggproto("StatLm", Stat,
+  required_aes = c("x", "y"),
+  # We have added some parameters to the created stat that allows to change
+  # formula by which the regression is computed.
+  compute_group = function(data, scales, params, n = 100, formula = y ~ x) {
+    rng <- range(data$x, na.rm = TRUE)
+    grid <- data.frame(x = seq(rng[1], rng[2], length = n))
+    mod <- lm(formula, data = data)
+    grid$y <- predict(mod, newdata = grid)
+    grid
+  }
+)
+#----------------------------------------------------- 2. WRITE A LAYER FUNCTION
+stat_lm <- function(mapping = NULL, data = NULL, geom = "line",
+                    position = "identity", na.rm = FALSE, show.legend = NA,
+                    inherit.aes = TRUE, n = 50, formula = y ~ x,
+                    ...) {
+  layer(
+    stat = StatLm, data = data, mapping = mapping, geom = geom,
+    position = position, show.legend = show.legend, inherit.aes = inherit.aes,
+    # Includes the new parameters to the stat.
+    params = list(n = n, formula = formula, na.rm = na.rm, ...)
+  )
+}
+ggplot(mpg, aes(displ, hwy)) +
+  geom_point() +
+  stat_lm(formula = y ~ poly(x, 10)) +
+  stat_lm(formula = y ~ poly(x, 10), geom = "point", colour = "red", n = 20)
+```
+
+The below example creates an automatic general parameter.
+
+```{r}
+#------------------------------------------------------- 1. CREATE A NEW GGPROTO
+StatDensityCommon <- ggproto("StatDensityCommon", Stat,
+  required_aes = "x",
+  setup_params = function(data, params) {
+    # If the bandwidth is specified, we do not have to perform its computation.
+    if (!is.null(params$bandwidth))
+      return(params)
+    # We estimate the bandwidth for each group using the bw.nrd0 function; then,
+    # we calculate the mean.
+    xs <- split(data$x, data$group)
+    bws <- vapply(xs, bw.nrd0, numeric(1))
+    bw <- mean(bws)
+    # Shows the calculated bandwidth.  This is a best practice.
+    message("Picking bandwidth of ", signif(bw, 3))
+    params$bandwidth <- bw
+    params
+  },
+  compute_group = function(data, scales, bandwidth = 1) {
+    d <- density(data$x, bw = bandwidth)
+    data.frame(x = d$x, y = d$y)
+  }
+)
+#----------------------------------------------------- 2. WRITE A LAYER FUNCTION
+stat_density_common <- function(mapping = NULL, data = NULL, geom = "line",
+                                position = "identity", na.rm = FALSE, show.legend = NA,
+                                inherit.aes = TRUE, bandwidth = NULL,
+                                ...) {
+  layer(
+    stat = StatDensityCommon, data = data, mapping = mapping, geom = geom,
+    position = position, show.legend = show.legend, inherit.aes = inherit.aes,
+    # We have to include the computed bandwidth to list of parameters.
+    params = list(bandwidth = bandwidth, na.rm = na.rm, ...)
+  )
+}
+# Since we have not indicated the bandwidth, the stat calculates it.
+ggplot(mpg, aes(displ, colour = drv)) +
+  stat_density_common()
+# Once having specified the bandwidth parameter, the stats does not computes it.
+ggplot(mpg, aes(displ, colour = drv)) +
+  stat_density_common(bandwidth = 0.5)
+```
+
+We can return a calculated parameter as a default with the `default_aes` argument.
+
+```{r}
+# Since the layer has already defined, we only need to modify the ggproto
+# object.
+StatDensityCommon <- ggproto("StatDensity2", Stat,
+  required_aes = "x",
+  # Maps the density to y.
+  default_aes = aes(y = ..density..),
+  compute_group = function(data, scales, bandwidth = 1) {
+    d <- density(data$x, bw = bandwidth)
+    data.frame(x = d$x, density = d$y)
+  }
+)
+# We use the calculated density by the created stat.
+ggplot(mpg, aes(displ, drv, colour = ..density..)) +
+  stat_density_common(bandwidth = 1, geom = "point")
+```
+
+## Creating a new geom
+
+It is necessary to know about how it grid works so as to create a new geom.
+
+The creation of a geom is similar to creating a stat. You always need to provide the following four elements to the ggproto object:
+
+  1.- `required_aes` is a character vector of the required aesthetics.
+
+  2.- `default_aes` sets up the default aesthetic values for certain arguments.
+
+  3.- `draw_key` establishes the function used to draw the key in the legend (please see `?draw_key`).
+
+  4.- `draw_panel()` Is a function that **returns a grid grob** and has the following three arguments (it is called once for **each panel**):
+
+  a)  `data`: a data frame with a column **for each specified aesthetic**.
+
+  b)  `panel_scales`: a list with information about the x and y scales **for the current panel**.
+
+  c)  `coord`: an object that describes the coordinate system used by your plot.
+  
+  The last two parameters are not of much utility, except that they transform the data so as to be plotted.
+
+```{r}
+#------------------------------------------------------- 1. CREATE A NEW GGPROTO
+GeomSimplePoint <- ggproto(`_class`   = "GeomSimplePoint",
+                           `_inherit` = Geom,
+  required_aes = c("x", "y"),
+  default_aes = aes(shape = 19, colour = "black"),
+  draw_key = draw_key_point,
+  draw_panel = function(data, panel_scales, coord) {
+    # Creates a data frame where position variables are scaled to the range (0, 1).
+    coords <- coord$transform(data, panel_scales)
+    # With the scaled data, you create the grid grob object.
+    grid::pointsGrob(
+      x = coords$x, y = coords$y,
+      pch = coords$shape,
+      gp = grid::gpar(col = coords$colour)
+    )
+  }
+)
+#----------------------------------------------------- 2. WRITE A LAYER FUNCTION
+geom_simple_point <- function(mapping = NULL, data = NULL, stat = "identity",
+                              position = "identity", na.rm = FALSE, show.legend = NA,
+                              inherit.aes = TRUE, ...) {
+  layer(
+    geom = GeomSimplePoint, mapping = mapping,  data = data, stat = stat,
+    position = position, show.legend = show.legend, inherit.aes = inherit.aes,
+    params = list(na.rm = na.rm, ...)
+  )
+}
+# Uses the created geom.
+ggplot(mpg, aes(displ, hwy)) +
+  geom_simple_point()
+```
+
