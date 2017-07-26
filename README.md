@@ -5,7 +5,7 @@ This project illustrates **how to create a new ggplot2 geom in R** that allows t
 ##  Organization of the Files
 
 The project has the following structure:
-  * **_CODES**: Has two files: [ggplot2.R](./_CODES/ggplot2.R) and [submitted\_geom\_hurricane.R](./_CODES/submitted_geom_hurricane.R).  The first one creates two visualizations of the Hurricane Ike and the latter was the submitted code for the peer-graded assignment of the Coursera's course; moreover, this contains roxygen2-style documentation to exemplify how to integrate the new geom into a new R package.
+  * **_CODES**: Includes two files: [ggplot2.R](./_CODES/ggplot2.R) and [submitted\_geom\_hurricane.R](./_CODES/submitted_geom_hurricane.R).  The first one creates two visualizations of the Hurricane Ike and the latter was the submitted code for the peer-graded assignment of the Coursera's course; moreover, this contains roxygen2-style documentation to exemplify how to integrate the new geom into a new R package.
   * **_GRAPHS**: Contains the plots created by [ggplot2.R](./_CODES/ggplot2.R) code in order to demonstrate how the new geom works: [Ike\_path.png](./_GRAPHS/Ike_path.png?raw=true) and [submitted\_image.png](./_GRAPHS/submitted_image.png?raw=true).
   * **_RESOURCES**: Includes all the resources that I used during the creation process of the new geom.
   * **_TEXTS**: Consists of all my personal notes that I considered relevant for this task.
